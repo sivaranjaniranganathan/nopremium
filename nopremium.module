@@ -35,7 +35,7 @@ function nopremium_form_alter(array &$form, FormStateInterface $form_state) {
     $node_type_id = $form_state->getBuildInfo()['callback_object']->getEntity()->getType();
     $form['premium']['#group'] = 'premium_publish_options';
     $form['premium']['#access'] = ($user->hasPermission('override premium option of any content type') ||  $user->hasPermission('override ' . $node_type_id . ' premium content'));
-    $form['premium_publish_options'] = [
+    /*$form['premium_publish_options'] = [
       '#type' => 'details',
       '#title' => t('Premium Options'),
       '#group' => 'advanced',
@@ -44,7 +44,7 @@ function nopremium_form_alter(array &$form, FormStateInterface $form_state) {
       ],
       '#weight' => 1000,
       '#optional' => TRUE,
-    ];
+    ];*/
   }
 
   // Alter node type add/edit forms.
