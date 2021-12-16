@@ -1,0 +1,13 @@
+name: Node Option Premium
+type: module
+description: 'Shows only the teasers of premium contents to unprivileged users.'
+core: 8.x
+core_version_requirement: ^8 || ^9
+configure: nopremium.admin_settings
+dependencies:
+  - node
+
+# Information added by Drupal.org packaging script on 2020-11-09
+version: '8.x-1.0'
+project: 'nopremium'
+datestamp: 1604918672

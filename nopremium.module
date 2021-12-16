@@ -1,0 +1,239 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations.
+ */
+
+use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\migrate\Plugin\MigrationInterface;
+use Drupal\migrate\Plugin\MigrateSourceInterface;
+use Drupal\migrate\Row;
+use Drupal\node\Entity\NodeType;
+use Drupal\node\NodeForm;
+use Drupal\node\NodeTypeForm;
+use Drupal\node\Plugin\migrate\source\d6\Node as MigrateD6Node;
+use Drupal\node\Plugin\migrate\source\d7\Node as MigrateD7Node;
+
+/**
+ * Implements hook_form_alter().
+ *
+ * Alters the following forms:
+ * - node add/edit forms;
+ * - node type add/edit forms.
+ */
+function nopremium_form_alter(array &$form, FormStateInterface $form_state) {
+  $form_object = $form_state->getFormObject();
+
+  // Alter node add/edit forms.
+  if ($form_object instanceof NodeForm) {
+    $user = \Drupal::currentUser();
+    $node_type_id = $form_state->getBuildInfo()['callback_object']->getEntity()->getType();
+    $form['premium']['#group'] = 'premium_publish_options';
+    $form['premium']['#access'] = ($user->hasPermission('override premium option of any content type') ||  $user->hasPermission('override ' . $node_type_id . ' premium content'));
+    $form['premium_publish_options'] = [
+      '#type' => 'details',
+      '#title' => t('Premium Options'),
+      '#group' => 'advanced',
+      '#attributes' => [
+        'class' => ['node-form-premium-publish-options'],
+      ],
+      '#weight' => 1000,
+      '#optional' => TRUE,
+    ];
+  }
+
+  // Alter node type add/edit forms.
+  if ($form_object instanceof NodeTypeForm) {
+    $form['workflow']['options']['#options']['premium'] = t('Premium content');
+    $form['actions']['submit']['#submit'][] = 'nopremium_node_type_edit_form_submit';
+
+    // Set the checkbox value when active.
+    $node_type = $form_state->getBuildInfo()['callback_object']->getEntity();
+    if ($node_type->id()) {
+      $fields = \Drupal::service('entity_field.manager')->getFieldDefinitions('node', $node_type->id());
+      if (isset($fields['premium'])) {
+        $field_config = $fields['premium']->getConfig($node_type->id());
+        if ($field_config->get('default_value')[0]['value']) {
+          $form['workflow']['options']['#default_value']['premium'] = 'premium';
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Submit handler for node type forms.
+ *
+ * @see nopremium_form_alter()
+ */
+function nopremium_node_type_edit_form_submit($form, FormStateInterface $form_state) {
+  $values = $form_state->getValues();
+  $node_type = $form_state->getBuildInfo()['callback_object']->getEntity();
+  $fields = \Drupal::service('entity_field.manager')
+    ->getFieldDefinitions('node', $node_type->id());
+  if (in_array('premium', $values['options'])) {
+    $value = (bool) $values['options']['premium'];
+    $fields['premium']->getConfig($node_type->id())->setDefaultValue($value)->save();
+  }
+}
+
+/**
+ * Implements hook_entity_base_field_info().
+ */
+function nopremium_entity_base_field_info(EntityTypeInterface $entity_type) {
+  if ($entity_type->id() === 'node') {
+    $fields = [];
+    $fields['premium'] = BaseFieldDefinition::create('boolean')
+      ->setLabel(t('@label', ['@label' => 'Premium content']))
+      ->setDescription(t('@description', ['@description' => 'Shows only the teasers of premium contents to unprivileged users.']))
+      ->setRevisionable(TRUE)
+      ->setTranslatable(TRUE)
+      ->setDefaultValue(0)
+      ->setDisplayConfigurable('form', TRUE)
+      ->setDisplayOptions('form', [
+        'type' => 'boolean_checkbox',
+        'settings' => [
+          'display_label' => TRUE,
+        ],
+        'weight' => 16,
+      ]
+    );
+    return $fields;
+  }
+}
+
+/**
+ * Implements entity_view_mode_alter().
+ */
+function nopremium_entity_view_mode_alter(&$view_mode, EntityInterface $entity, $context) {
+  /** @var \Drupal\Core\Session\AccountInterface $user */
+  $user = \Drupal::currentUser();
+  /** @var \Drupal\Core\Config\ImmutableConfig $config */
+  $config = \Drupal::config('nopremium.settings');
+  /** @var \Drupal\nopremium\NodeOptionPremiumHelperInterface $helper */
+  $helper = \Drupal::service('nopremium.helper');
+
+  // Check if premium access applies for the current view mode.
+  $view_modes_config = $config->get('view_modes');
+  if (empty($view_modes_config)) {
+    // No premium view modes configured. If the current view mode is *not* the
+    // teaser view mode, the current view mode is premium.
+    $view_mode_applies = ($view_mode != $config->get('teaser_view_mode'));
+  }
+  else {
+    // Premium view modes are configured. Check if the current view mode is a
+    // premium one.
+    $view_mode_applies = !empty($view_modes_config[$view_mode]);
+  }
+
+  if ($view_mode_applies
+    && $entity->getEntityTypeId() == 'node'
+    && !$helper->hasFullAccess($entity, $user)
+  ) {
+    // Store the original view mode. This is data is later used to:
+    // - Set the template variable 'page' to TRUE, in case the view mode was
+    //   'full';
+    // - Determine if the premium message should be shown.
+    // @see nopremium_node_view()
+    // @see nopremium_preprocess_node()
+    $entity->original_view_mode = $view_mode;
+
+    // Override the current view mode.
+    $view_mode = $config->get('teaser_view_mode');
+  }
+}
+
+/**
+ * Implements hook_entity_extra_field_info().
+ */
+function nopremium_entity_extra_field_info() {
+  $extra = [];
+  foreach (NodeType::loadMultiple() as $bundle) {
+    $extra['node'][$bundle->id()]['display']['premium_message'] = [
+      'label' => t('Premium message'),
+      'description' => t('Node option premium module message.'),
+      'weight' => 100,
+      'visible' => FALSE,
+    ];
+  }
+  return $extra;
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_view() for 'node'.
+ */
+function nopremium_node_view(array &$build, EntityInterface $entity, EntityViewDisplayInterface $display, $view_mode) {
+  $user = \Drupal::currentUser();
+  $token_service = \Drupal::token();
+  $config = \Drupal::config('nopremium.settings');
+  if ($view_mode == $config->get('teaser_view_mode')
+    && !empty($entity->original_view_mode)
+    && $entity->hasField('premium')
+    && !empty($entity->premium->value)) {
+    // Get content type specific premium message.
+    $message = $config->get('messages.' . $entity->bundle());
+    if (empty($message)) {
+      // If the content specific message is empty, pick the default one.
+      $message = $config->get('default_message');
+    }
+
+    // Replace tokens if they are available in the premium message.
+    $message = $token_service->replace($message, [
+      'user' => $user,
+      'node' => $entity,
+    ]);
+    $build['premium_message'] = [
+      '#markup' => $message,
+    ];
+
+    // Hide links by default. This ensures that on full content displays, no
+    // read more link gets shown.
+    if (isset($build['links'])) {
+      $build['links']['#access'] = FALSE;
+    }
+  }
+}
+
+/**
+ * Implements template_preprocess_node().
+ */
+function nopremium_preprocess_node(&$variables) {
+  /** @var \Drupal\node\NodeInterface $node */
+  $node = $variables['elements']['#node'];
+
+  if (!empty($node->original_view_mode)) {
+    if ($node->original_view_mode == 'full' && node_is_page($node)) {
+      // If the original view mode was 'full', set the template variable 'page'
+      // to TRUE. This ensures that the h2 title is not shown when the default
+      // node template is used.
+      $variables['page'] = TRUE;
+    }
+  }
+}
+
+/**
+ * Implements hook_migrate_prepare_row().
+ *
+ * Adds premium data to node source.
+ */
+function nopremium_migrate_prepare_row(Row $row, MigrateSourceInterface $source, MigrationInterface $migration) {
+  if ($source instanceof MigrateD6Node || $source instanceof MigrateD7Node) {
+    if (!$source->getDatabase()->schema()->fieldExists('node', 'premium')) {
+      // The node table from the database in question does not have a column
+      // named 'premium', so there's no premium data to migrate from the D6 or
+      // D7 site.
+      return;
+    }
+
+    // Get the premium data from the node table for the given node.
+    // @todo find out how to alter the original migrate query as that would give
+    // a better performance.
+    $value = (bool) $source->getDatabase()->query('SELECT premium FROM {node} WHERE nid = :nid', [':nid' => $row->getSourceProperty('nid')])->fetchField();
+    $row->setSourceProperty('premium', $value);
+  }
+}

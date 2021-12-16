@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the nopremium module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function nopremium_uninstall() {
+  /** @var \Drupal\Core\Config\StorageInterface $config_storage */
+  $config_storage = \Drupal::service('config.storage');
+
+  // Get a list of all content types.
+  $node_types = \Drupal::entityTypeManager()
+    ->getStorage('node_type')
+    ->loadMultiple();
+
+  // Delete premium config for each content type.
+  foreach ($node_types as $node_type) {
+    $config_storage->delete('core.base_field_override.node.' . $node_type->id() . '.premium');
+  }
+}
