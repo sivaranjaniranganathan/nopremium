@@ -35,16 +35,16 @@ function nopremium_form_alter(array &$form, FormStateInterface $form_state) {
     $node_type_id = $form_state->getBuildInfo()['callback_object']->getEntity()->getType();
     $form['premium']['#group'] = 'premium_publish_options';
     $form['premium']['#access'] = ($user->hasPermission('override premium option of any content type') ||  $user->hasPermission('override ' . $node_type_id . ' premium content'));
-    // $form['premium_publish_options'] = [
-    //   '#type' => 'details',
-    //   '#title' => t('Premium Options'),
-    //   '#group' => 'advanced',
-    //   '#attributes' => [
-    //     'class' => ['node-form-premium-publish-options'],
-    //   ],
-    //   '#weight' => 1000,
-    //   '#optional' => TRUE,
-    // ];
+    $form['premium_publish_options'] = [
+      '#type' => 'details',
+      '#title' => t('Premium Options'),
+      '#group' => 'advanced',
+      '#attributes' => [
+        'class' => ['node-form-premium-publish-options'],
+      ],
+      '#weight' => 1000,
+      '#optional' => TRUE,
+    ];
   }
 
   // Alter node type add/edit forms.
@@ -131,10 +131,9 @@ function nopremium_entity_view_mode_alter(&$view_mode, EntityInterface $entity, 
     $view_mode_applies = !empty($view_modes_config[$view_mode]);
   }
 
-  $permission_level = $entity->premium_perm->value;
   if ($view_mode_applies
     && $entity->getEntityTypeId() == 'node'
-    && ( (!$helper->hasFullAccess($entity, $user)) || (!empty($permission_level) && !$user->hasPermission($permission_level)))
+    && !$helper->hasFullAccess($entity, $user)
   ) {
     // Store the original view mode. This is data is later used to:
     // - Set the template variable 'page' to TRUE, in case the view mode was
